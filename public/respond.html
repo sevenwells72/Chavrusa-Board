@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Chavrus Board | Respond</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Instrument+Sans:wght@400;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="page">
+      <header>
+        <h1>Chavrus Board</h1>
+        <nav>
+          <a href="/">Browse</a>
+          <a href="/post">Post a request</a>
+        </nav>
+      </header>
+
+      <section id="postDetails" class="card stack"></section>
+
+      <section class="card">
+        <h2>Respond Privately</h2>
+        <form id="respondForm" class="stack">
+          <label>
+            Your message
+            <textarea name="message" required placeholder="Share what you want to learn and why you might be a good fit."></textarea>
+          </label>
+
+          <div class="row-2">
+            <label>
+              Your time zone (optional)
+              <input name="timeZone" placeholder="e.g. America/New_York" />
+            </label>
+            <label>
+              Your availability (optional)
+              <input name="availability" placeholder="e.g. Sun 8-10pm, Tue 9pm" />
+            </label>
+          </div>
+
+          <label>
+            Your email (private for relay replies)
+            <input name="responderEmail" type="email" required />
+          </label>
+
+          <button type="submit">Send Message</button>
+          <p id="status" class="status"></p>
+        </form>
+      </section>
+    </main>
+    <script src="/respond.js"></script>
+  </body>
+</html>
