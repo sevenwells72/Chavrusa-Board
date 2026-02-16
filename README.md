@@ -1,4 +1,4 @@
-# Chavrus Board (v1 MVP)
+# Chavrusashaft (v1 MVP)
 
 Public bulletin board for chavrusa learning requests with private relay messaging.
 

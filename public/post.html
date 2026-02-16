@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Chavrus Board | Post a Request</title>
+    <title>Chavrusashaft | Post a Request</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Instrument+Sans:wght@400;600;700&display=swap" rel="stylesheet" />
@@ -12,7 +12,7 @@
   <body>
     <main class="page">
       <header>
-        <h1>Chavrus Board</h1>
+        <h1>Chavrusashaft</h1>
         <nav>
           <a href="/">Browse</a>
           <a href="/post">Post a request</a>
@@ -32,13 +32,22 @@
                 <option value="Tanach">Tanach</option>
                 <option value="Mussar">Mussar</option>
                 <option value="Hashkafa">Hashkafa</option>
+                <option value="Chassidus">Chassidus</option>
+                <option value="Kabbala">Kabbala</option>
                 <option value="Other">Other</option>
               </select>
             </label>
             <label>
-              Topic
-              <input name="topic" required placeholder="e.g. Masechet Berachot, Hilchot Shabbat" />
+              Sefer name
+              <input name="seferName" required placeholder="e.g. Maseches Makos, Tanya, Mesillas Yesharim" />
             </label>
+            <label>
+              Sugya
+              <input name="topic" required placeholder="e.g. Muktza, Nizkei Mamon" />
+            </label>
+          </div>
+
+          <div class="row-3">
             <label>
               Familiarity level
               <select name="familiarityLevel" required>
@@ -74,20 +83,35 @@
               </select>
             </label>
             <label>
-              Duration
+              Post expires after
               <select name="durationDays" required>
                 <option value="">Select duration</option>
                 <option value="7">7 days</option>
                 <option value="14">14 days</option>
                 <option value="30">30 days</option>
               </select>
-              <span class="field-note">How long this post stays active before it auto-expires.</span>
+              <span class="field-note">How long this post stays visible before auto-expiring.</span>
             </label>
           </div>
 
+          <section class="slot-editor">
+            <div class="slot-header">
+              <h3>Preferred time slots</h3>
+              <button id="addSlotBtn" type="button" class="secondary">+ Add another slot</button>
+            </div>
+            <p class="field-note">Add as many as you want: day + time range, or mark a day as flexible.</p>
+            <div id="slotList" class="stack"></div>
+            <input id="availabilitySlotsInput" type="hidden" name="availabilitySlots" />
+          </section>
+
+          <label class="toggle">
+            <input type="checkbox" name="openToOtherTimes" />
+            Open to other times too
+          </label>
+
           <label>
-            Availability
-            <textarea name="availability" required placeholder="Share your weekly availability and preferred session length."></textarea>
+            Availability notes
+            <textarea name="availabilityNotes" placeholder="Optional notes, e.g. flexible on Sundays, prefer after Maariv."></textarea>
           </label>
 
           <div id="locationFields" class="row-2 hidden">

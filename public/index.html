@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Chavrus Board | Browse</title>
+    <title>Chavrusashaft | Browse</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Instrument+Sans:wght@400;600;700&display=swap" rel="stylesheet" />
@@ -12,7 +12,7 @@
   <body>
     <main class="page">
       <header>
-        <h1>Chavrus Board</h1>
+        <h1 id="siteTitle">Chavrusashaft</h1>
         <nav>
           <a href="/">Browse</a>
           <a href="/post">Post a request</a>
@@ -20,16 +20,20 @@
       </header>
 
       <section class="intro stack">
-        <h2>What This Is + Browse</h2>
-        <p>A public bulletin board for finding a chavrusa.</p>
-        <p>Post what you want to learn. Browse active requests. Start with private relay messages.</p>
-        <p>No matching algorithm, no public profiles, and no pressure to reveal identity upfront.</p>
+        <h2>Find a Chavrusa</h2>
+        <p>Post what you want to learn. Browse open requests. Connect through private relay - no profiles, no pressure.</p>
+        <p>Chavrusashaft is a simple bulletin board for finding a learning partner. Here's how it works: you post a request with what you want to learn, your availability, and your preferred style. Others browse the board and reach out privately if it's a good fit. There are no profiles to set up, no matching algorithms, and no one sees your info until you're ready to connect. Think of it like a shul bulletin board - but online, and open to everyone.</p>
         <div class="actions">
           <a class="button-link" href="/post">Post a Request</a>
         </div>
       </section>
 
       <section class="filters">
+        <label>
+          Sefer
+          <input id="seferFilter" type="search" placeholder="Search by sefer name" />
+        </label>
+
         <label>
           Category
           <select id="categoryFilter">
@@ -49,9 +53,37 @@
         </label>
 
         <label>
+          Level
+          <select id="levelFilter">
+            <option value="">All levels</option>
+          </select>
+        </label>
+
+        <label>
           Time Zone
           <select id="timeZoneFilter">
             <option value="">All time zones</option>
+          </select>
+        </label>
+
+        <label>
+          Available day
+          <select id="dayFilter">
+            <option value="">Any day</option>
+            <option value="Sun">Sun</option>
+            <option value="Mon">Mon</option>
+            <option value="Tue">Tue</option>
+            <option value="Wed">Wed</option>
+            <option value="Thu">Thu</option>
+            <option value="Fri">Fri</option>
+            <option value="Motzei Shabbos">Motzei Shabbos</option>
+          </select>
+        </label>
+
+        <label>
+          Available time
+          <select id="timeFilter">
+            <option value="">Any time</option>
           </select>
         </label>
       </section>

@@ -45,6 +45,73 @@ function normalize(value) {
   return value.trim();
 }
 
+function normalizeTime(value) {
+  const match = normalize(value).match(/^([01]\d|2[0-3]):([0-5]\d)$/);
+  return match ? `${match[1]}:${match[2]}` : "";
+}
+
+function titleCaseWords(value) {
+  return normalize(value)
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => part[0].toUpperCase() + part.slice(1).toLowerCase())
+    .join(" ");
+}
+
+function parseAvailabilitySlots(value) {
+  let rawSlots = value;
+  if (typeof rawSlots === "string") {
+    try {
+      rawSlots = JSON.parse(rawSlots);
+    } catch (_error) {
+      return [];
+    }
+  }
+  if (!Array.isArray(rawSlots)) {
+    return [];
+  }
+
+  const slots = [];
+  for (const entry of rawSlots) {
+    const day = normalize(entry?.day);
+    const start = normalizeTime(entry?.start);
+    const end = normalizeTime(entry?.end);
+    const flexible = Boolean(entry?.flexible);
+    if (!day) {
+      continue;
+    }
+    if (!flexible && (!start || !end || start >= end)) {
+      continue;
+    }
+    slots.push({
+      day,
+      start: flexible ? "" : start,
+      end: flexible ? "" : end,
+      flexible
+    });
+  }
+  return slots;
+}
+
+function parseSlotsFromRow(rowValue) {
+  try {
+    const parsed = JSON.parse(rowValue || "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (_error) {
+    return [];
+  }
+}
+
+function toSafeBool(value, fallback = false) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "string") {
+    return value.toLowerCase() === "true";
+  }
+  return fallback;
+}
+
 function getTransporter() {
   const host = process.env.SMTP_HOST;
   const user = process.env.SMTP_USER;
@@ -74,18 +141,24 @@ function getTransporter() {
 function toPublicPost(post) {
   const showLocation =
     post.format === "in_person_only" || post.format === "in_person_preferred";
+  const postCode = `CB-${String(post.id || "").slice(0, 6).toUpperCase()}`;
 
   return {
     id: post.id,
+    postCode,
     category: post.category,
+    seferName: post.seferName,
     topic: post.topic,
     learningStyle: post.learningStyle,
     familiarityLevel: post.familiarityLevel,
     timeZone: post.timeZone,
-    availability: post.availability,
+    availabilityNotes: post.availabilityNotes,
+    availabilitySlots: parseSlotsFromRow(post.availabilitySlots),
+    openToOtherTimes: Boolean(post.openToOtherTimes),
     format: post.format,
     city: showLocation ? post.city : "",
     state: showLocation ? post.state : "",
+    posterName: titleCaseWords(post.posterName),
     createdAt: post.createdAt,
     expiresAt: post.expiresAt
   };
@@ -108,11 +181,14 @@ function applyRateLimit(req, key, limit, windowMs) {
 function validatePostPayload(payload, options = {}) {
   const requireDuration = options.requireDuration !== false;
   const category = normalize(payload.category);
+  const seferName = normalize(payload.seferName);
   const topic = normalize(payload.topic);
   const learningStyle = normalize(payload.learningStyle);
   const familiarityLevel = normalize(payload.familiarityLevel);
   const timeZone = normalize(payload.timeZone);
-  const availability = normalize(payload.availability);
+  const availabilityNotes = normalize(payload.availabilityNotes || payload.availability);
+  const availabilitySlots = parseAvailabilitySlots(payload.availabilitySlots);
+  const openToOtherTimes = toSafeBool(payload.openToOtherTimes, false);
   const format = normalize(payload.format);
   const city = normalize(payload.city);
   const state = normalize(payload.state);
@@ -123,15 +199,19 @@ function validatePostPayload(payload, options = {}) {
 
   if (
     !category ||
+    !seferName ||
     !topic ||
     !learningStyle ||
     !familiarityLevel ||
     !timeZone ||
-    !availability ||
     !format ||
     !email
   ) {
     return { error: "Please fill all required fields." };
+  }
+
+  if (!availabilitySlots.length) {
+    return { error: "Add at least one preferred time slot." };
   }
 
   if (!allowedFormats.has(format)) {
@@ -154,16 +234,19 @@ function validatePostPayload(payload, options = {}) {
   return {
     value: {
       category,
+      seferName,
       topic,
       learningStyle,
       familiarityLevel,
       timeZone,
-      availability,
+      availabilityNotes,
+      availabilitySlots,
+      openToOtherTimes,
       format,
       city: needsLocation ? city : "",
       state: needsLocation ? state : "",
       email,
-      posterName,
+      posterName: titleCaseWords(posterName),
       contactMethod,
       durationDays: requireDuration ? durationDays : undefined
     }
@@ -174,17 +257,21 @@ function initDb() {
   fs.mkdirSync(dataDir, { recursive: true });
   db = new Database(dbPath);
   db.pragma("journal_mode = WAL");
+  db.pragma("foreign_keys = ON");
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS posts (
       id TEXT PRIMARY KEY,
       manageToken TEXT UNIQUE NOT NULL,
       category TEXT NOT NULL,
+      seferName TEXT NOT NULL DEFAULT '',
       topic TEXT NOT NULL,
       learningStyle TEXT NOT NULL,
       familiarityLevel TEXT NOT NULL,
       timeZone TEXT NOT NULL,
-      availability TEXT NOT NULL,
+      availabilityNotes TEXT NOT NULL DEFAULT '',
+      availabilitySlots TEXT NOT NULL DEFAULT '[]',
+      openToOtherTimes INTEGER NOT NULL DEFAULT 0,
       format TEXT NOT NULL,
       city TEXT NOT NULL DEFAULT '',
       state TEXT NOT NULL DEFAULT '',
@@ -217,7 +304,35 @@ function initDb() {
     );
   `);
 
+  ensurePostsSchema();
   migrateFromJsonIfNeeded();
+}
+
+function ensurePostsSchema() {
+  const columns = db.prepare("PRAGMA table_info(posts)").all();
+  const hasSeferName = columns.some((column) => column.name === "seferName");
+  const hasAvailabilityNotes = columns.some((column) => column.name === "availabilityNotes");
+  const hasAvailabilitySlots = columns.some((column) => column.name === "availabilitySlots");
+  const hasOpenToOtherTimes = columns.some((column) => column.name === "openToOtherTimes");
+  const hasAvailability = columns.some((column) => column.name === "availability");
+  if (!hasSeferName) {
+    db.exec("ALTER TABLE posts ADD COLUMN seferName TEXT NOT NULL DEFAULT ''");
+  }
+  if (!hasAvailabilityNotes) {
+    db.exec("ALTER TABLE posts ADD COLUMN availabilityNotes TEXT NOT NULL DEFAULT ''");
+  }
+  if (!hasAvailabilitySlots) {
+    db.exec("ALTER TABLE posts ADD COLUMN availabilitySlots TEXT NOT NULL DEFAULT '[]'");
+  }
+  if (!hasOpenToOtherTimes) {
+    db.exec("ALTER TABLE posts ADD COLUMN openToOtherTimes INTEGER NOT NULL DEFAULT 0");
+  }
+
+  if (hasAvailability) {
+    db.exec(
+      "UPDATE posts SET availabilityNotes = CASE WHEN TRIM(availabilityNotes) = '' THEN availability ELSE availabilityNotes END"
+    );
+  }
 }
 
 function migrateFromJsonIfNeeded() {
@@ -234,11 +349,11 @@ function migrateFromJsonIfNeeded() {
 
   const insertPost = db.prepare(`
     INSERT INTO posts (
-      id, manageToken, category, topic, learningStyle, familiarityLevel, timeZone, availability,
-      format, city, state, contactMethod, posterName, email, durationDays, createdAt, expiresAt, status
+      id, manageToken, category, seferName, topic, learningStyle, familiarityLevel, timeZone, availabilityNotes,
+      availabilitySlots, openToOtherTimes, format, city, state, contactMethod, posterName, email, durationDays, createdAt, expiresAt, status
     ) VALUES (
-      @id, @manageToken, @category, @topic, @learningStyle, @familiarityLevel, @timeZone, @availability,
-      @format, @city, @state, @contactMethod, @posterName, @email, @durationDays, @createdAt, @expiresAt, @status
+      @id, @manageToken, @category, @seferName, @topic, @learningStyle, @familiarityLevel, @timeZone, @availabilityNotes,
+      @availabilitySlots, @openToOtherTimes, @format, @city, @state, @contactMethod, @posterName, @email, @durationDays, @createdAt, @expiresAt, @status
     )
   `);
 
@@ -264,11 +379,16 @@ function migrateFromJsonIfNeeded() {
         id: post.id || randomToken(8),
         manageToken: post.manageToken || randomToken(16),
         category: post.category || "Other",
+        seferName: post.seferName || post.topic || "",
         topic: post.topic || "Untitled",
         learningStyle: post.learningStyle || "",
         familiarityLevel: post.familiarityLevel || "Beginner",
         timeZone: post.timeZone || "America/New_York",
-        availability: post.availability || "",
+        availabilityNotes: post.availabilityNotes || post.availability || "",
+        availabilitySlots: JSON.stringify(
+          Array.isArray(post.availabilitySlots) ? post.availabilitySlots : []
+        ),
+        openToOtherTimes: post.openToOtherTimes ? 1 : 0,
         format: post.format || "flexible",
         city: post.city || "",
         state: post.state || "",
@@ -415,11 +535,14 @@ app.post("/api/posts", async (req, res) => {
       id: randomToken(8),
       manageToken: randomToken(16),
       category: data.category,
+      seferName: data.seferName,
       topic: data.topic,
       learningStyle: data.learningStyle,
       familiarityLevel: data.familiarityLevel,
       timeZone: data.timeZone,
-      availability: data.availability,
+      availabilityNotes: data.availabilityNotes,
+      availabilitySlots: JSON.stringify(data.availabilitySlots),
+      openToOtherTimes: data.openToOtherTimes ? 1 : 0,
       format: data.format,
       city: data.city,
       state: data.state,
@@ -435,11 +558,11 @@ app.post("/api/posts", async (req, res) => {
     db.prepare(
       `
       INSERT INTO posts (
-        id, manageToken, category, topic, learningStyle, familiarityLevel, timeZone, availability,
-        format, city, state, contactMethod, posterName, email, durationDays, createdAt, expiresAt, status
+        id, manageToken, category, seferName, topic, learningStyle, familiarityLevel, timeZone, availabilityNotes,
+        availabilitySlots, openToOtherTimes, format, city, state, contactMethod, posterName, email, durationDays, createdAt, expiresAt, status
       ) VALUES (
-        @id, @manageToken, @category, @topic, @learningStyle, @familiarityLevel, @timeZone, @availability,
-        @format, @city, @state, @contactMethod, @posterName, @email, @durationDays, @createdAt, @expiresAt, @status
+        @id, @manageToken, @category, @seferName, @topic, @learningStyle, @familiarityLevel, @timeZone, @availabilityNotes,
+        @availabilitySlots, @openToOtherTimes, @format, @city, @state, @contactMethod, @posterName, @email, @durationDays, @createdAt, @expiresAt, @status
       )
     `
     ).run(post);
@@ -450,9 +573,9 @@ app.post("/api/posts", async (req, res) => {
         await transporter.sendMail({
           from: process.env.RELAY_FROM_EMAIL || process.env.SMTP_USER,
           to: post.email,
-          subject: "[Chavrus Board] Your post is live",
+          subject: "[Chavrusashaft] Your post is live",
           text: [
-            "Your learning request is now active on Chavrus Board.",
+            "Your learning request is now active on Chavrusashaft.",
             "",
             `Topic: ${post.topic}`,
             `Active until: ${new Date(post.expiresAt).toLocaleDateString()}`,
@@ -525,7 +648,7 @@ app.post("/api/posts/:id/respond", async (req, res) => {
 
     const transporter = getTransporter();
     if (transporter) {
-      const subject = `[Chavrus Board] New response to: ${post.topic}`;
+      const subject = `[Chavrusashaft] New response to: ${post.topic}`;
       const body = [
         "You received a new response to your learning request.",
         "",
@@ -577,12 +700,16 @@ app.get("/api/manage/:token", async (req, res) => {
     return res.json({
       post: {
         id: post.id,
+        postCode: `CB-${String(post.id || "").slice(0, 6).toUpperCase()}`,
         category: post.category,
+        seferName: post.seferName,
         topic: post.topic,
         learningStyle: post.learningStyle,
         familiarityLevel: post.familiarityLevel,
         timeZone: post.timeZone,
-        availability: post.availability,
+        availabilityNotes: post.availabilityNotes,
+        availabilitySlots: parseSlotsFromRow(post.availabilitySlots),
+        openToOtherTimes: Boolean(post.openToOtherTimes),
         format: post.format,
         city: post.city,
         state: post.state,
@@ -591,7 +718,7 @@ app.get("/api/manage/:token", async (req, res) => {
         createdAt: post.createdAt,
         expiresAt: post.expiresAt,
         email: post.email,
-        posterName: post.posterName,
+        posterName: titleCaseWords(post.posterName),
         contactMethod: post.contactMethod
       },
       conversations
@@ -619,11 +746,14 @@ app.post("/api/manage/:token/update", async (req, res) => {
       UPDATE posts
       SET
         category = @category,
+        seferName = @seferName,
         topic = @topic,
         learningStyle = @learningStyle,
         familiarityLevel = @familiarityLevel,
         timeZone = @timeZone,
-        availability = @availability,
+        availabilityNotes = @availabilityNotes,
+        availabilitySlots = @availabilitySlots,
+        openToOtherTimes = @openToOtherTimes,
         format = @format,
         city = @city,
         state = @state,
@@ -634,11 +764,14 @@ app.post("/api/manage/:token/update", async (req, res) => {
     `
     ).run({
       category: data.category,
+      seferName: data.seferName,
       topic: data.topic,
       learningStyle: data.learningStyle,
       familiarityLevel: data.familiarityLevel,
       timeZone: data.timeZone,
-      availability: data.availability,
+      availabilityNotes: data.availabilityNotes,
+      availabilitySlots: JSON.stringify(data.availabilitySlots),
+      openToOtherTimes: data.openToOtherTimes ? 1 : 0,
       format: data.format,
       city: data.city,
       state: data.state,
@@ -694,6 +827,44 @@ app.post("/api/manage/:token/deactivate", async (req, res) => {
   }
 });
 
+app.post("/api/manage/:token/delete", async (req, res) => {
+  try {
+    const result = db.prepare("DELETE FROM posts WHERE manageToken = ?").run(req.params.token);
+    if (!result.changes) {
+      return res.status(404).json({ error: "Manage link not found." });
+    }
+    return res.json({ ok: true });
+  } catch (_error) {
+    return res.status(500).json({ error: "Could not delete post." });
+  }
+});
+
+app.post("/api/admin/delete", async (req, res) => {
+  const ownerDeleteKey = normalize(process.env.OWNER_DELETE_KEY);
+  const providedKey = normalize(req.body.key);
+  const postId = normalize(req.body.postId);
+
+  if (!ownerDeleteKey) {
+    return res.status(503).json({ error: "Owner delete key is not configured." });
+  }
+  if (!providedKey || providedKey !== ownerDeleteKey) {
+    return res.status(403).json({ error: "Unauthorized." });
+  }
+  if (!postId) {
+    return res.status(400).json({ error: "Post id is required." });
+  }
+
+  try {
+    const result = db.prepare("DELETE FROM posts WHERE id = ?").run(postId);
+    if (!result.changes) {
+      return res.status(404).json({ error: "Post not found." });
+    }
+    return res.json({ ok: true });
+  } catch (_error) {
+    return res.status(500).json({ error: "Could not delete post." });
+  }
+});
+
 app.post("/api/manage/:token/reply", async (req, res) => {
   const conversationId = normalize(req.body.conversationId);
   const message = normalize(req.body.message);
@@ -723,7 +894,7 @@ app.post("/api/manage/:token/reply", async (req, res) => {
     await transporter.sendMail({
       from: process.env.RELAY_FROM_EMAIL || process.env.SMTP_USER,
       to: conversation.responderEmail,
-      subject: `[Chavrus Board] Reply about: ${post.topic}`,
+      subject: `[Chavrusashaft] Reply about: ${post.topic}`,
       text: [
         "You received a reply from the post owner.",
         "",

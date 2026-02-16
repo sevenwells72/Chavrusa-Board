@@ -24,16 +24,33 @@ function postIdFromPath() {
 }
 
 function renderPost(post) {
+  const slots = Array.isArray(post.availabilitySlots) ? post.availabilitySlots : [];
+  const slotText = slots.length
+    ? slots
+        .map((slot) =>
+          slot.flexible ? `${slot.day} flexible` : `${slot.day} ${slot.start}-${slot.end}`
+        )
+        .join(", ")
+    : "";
+
   postDetails.innerHTML = `
     <h2>${escapeHtml(post.topic)}</h2>
+    <p class="muted">Post code: <strong>${escapeHtml(post.postCode || "")}</strong></p>
     <div class="meta">
       <span class="tag">${escapeHtml(post.category)}</span>
+      ${post.seferName ? `<span class="tag">${escapeHtml(post.seferName)}</span>` : ""}
       <span class="tag">${escapeHtml(formatLabels[post.format] || post.format)}</span>
       <span class="tag">${escapeHtml(post.timeZone)}</span>
       <span class="tag">${escapeHtml(post.familiarityLevel)}</span>
     </div>
     <p><strong>Learning style:</strong> ${escapeHtml(post.learningStyle)}</p>
-    <p><strong>Availability:</strong> ${escapeHtml(post.availability)}</p>
+    ${slotText ? `<p><strong>Times:</strong> ${escapeHtml(slotText)}</p>` : ""}
+    ${
+      post.availabilityNotes
+        ? `<p><strong>Availability notes:</strong> ${escapeHtml(post.availabilityNotes)}</p>`
+        : ""
+    }
+    ${post.openToOtherTimes ? `<p class="muted"><em>Open to other times too.</em></p>` : ""}
     ${
       post.city && post.state
         ? `<p><strong>Location:</strong> ${escapeHtml(post.city)}, ${escapeHtml(post.state)}</p>`

@@ -4,7 +4,8 @@
   --text: #1c1d1d;
   --muted: #5d625e;
   --border: #d8d8cc;
-  --accent: #0f6b4b;
+  --accent: #0a5a3f;
+  --accent-strong: #08452f;
   --accent-2: #e4f2eb;
 }
 
@@ -96,10 +97,23 @@ button {
   cursor: pointer;
 }
 
+.button-link:hover,
+button:hover {
+  background: var(--accent-strong);
+}
+
 .button-link.secondary,
 button.secondary {
   background: #ecf1ed;
   color: #2a352f;
+}
+
+button.danger {
+  background: #8f2233;
+}
+
+button.danger:hover {
+  background: #721b29;
 }
 
 .filters,
@@ -161,6 +175,32 @@ textarea {
   margin-top: 0.75rem;
 }
 
+.post-card {
+  padding: 1.1rem;
+  position: relative;
+}
+
+.post-head {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.6rem;
+}
+
+.display-name {
+  margin: 0;
+  font-weight: 700;
+  color: #23382e;
+  font-size: 0.95rem;
+}
+
+.post-body {
+  padding: 0.35rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.post-foot {
+  padding-top: 0.35rem;
+}
+
 .meta {
   display: flex;
   flex-wrap: wrap;
@@ -205,10 +245,68 @@ textarea {
   display: none;
 }
 
+.owner-delete-btn {
+  display: none;
+  position: absolute;
+  top: 0.65rem;
+  right: 0.65rem;
+  border: 1px solid #b64153;
+  background: #fff;
+  color: #8f2233;
+  border-radius: 999px;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+body.admin-mode .owner-delete-btn {
+  display: inline-block;
+}
+
+.slot-editor {
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  padding: 0.8rem;
+}
+
+.slot-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.slot-row {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.6rem;
+}
+
+.slot-row-grid {
+  display: grid;
+  gap: 0.6rem;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.toggle input[type="checkbox"] {
+  width: auto;
+  margin-top: 0;
+}
+
 @media (max-width: 760px) {
   .filters,
   .row-2,
   .row-3 {
+    grid-template-columns: 1fr;
+  }
+
+  .slot-row-grid {
     grid-template-columns: 1fr;
   }
 
