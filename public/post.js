@@ -11,7 +11,7 @@ const slotList = document.getElementById("slotList");
 const addSlotBtn = document.getElementById("addSlotBtn");
 const availabilitySlotsInput = document.getElementById("availabilitySlotsInput");
 
-const dayOptions = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Motzei Shabbos"];
+const dayOptions = ["Daily", "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Motzei Shabbos"];
 
 function toTitleCase(value) {
   return String(value || "")
@@ -51,13 +51,11 @@ function setLocationRequirement() {
   const needsLocation =
     formatSelect.value === "in_person_only" || formatSelect.value === "in_person_preferred";
   locationFields.classList.toggle("hidden", !needsLocation);
-  cityInput.required = needsLocation;
-  stateInput.required = needsLocation;
 }
 
 function buildDaySelect(selected = "") {
   return `
-    <select class="slot-day" required>
+    <select class="slot-day">
       <option value="">Day</option>
       ${dayOptions
         .map(
@@ -137,10 +135,6 @@ function collectSlots() {
     });
   }
 
-  if (!slots.length) {
-    return { error: "Add at least one preferred time slot." };
-  }
-
   return { slots };
 }
 
@@ -165,16 +159,30 @@ form.addEventListener("submit", async (event) => {
   const payload = Object.fromEntries(formData.entries());
 
   try {
-    const response = await fetch("/api/posts", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
-    const data = await response.json();
+    const request = async () =>
+      fetch("/api/posts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+    let response = await request();
+    if (!response.ok && response.status >= 500) {
+      // One retry for transient deploy/restart blips.
+      response = await request();
+    }
+
+    const raw = await response.text();
+    let data = {};
+    try {
+      data = raw ? JSON.parse(raw) : {};
+    } catch (_error) {
+      data = {};
+    }
 
     if (!response.ok) {
       statusEl.classList.add("error");
-      statusEl.textContent = data.error || "Could not submit request.";
+      const detail = data.error || `Request failed (${response.status}).`;
+      statusEl.textContent = detail;
       return;
     }
 

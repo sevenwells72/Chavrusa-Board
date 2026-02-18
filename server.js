@@ -180,52 +180,27 @@ function applyRateLimit(req, key, limit, windowMs) {
 
 function validatePostPayload(payload, options = {}) {
   const requireDuration = options.requireDuration !== false;
-  const category = normalize(payload.category);
+  const category = normalize(payload.category) || "Other";
   const seferName = normalize(payload.seferName);
-  const topic = normalize(payload.topic);
+  const topic = normalize(payload.topic) || "Untitled request";
   const learningStyle = normalize(payload.learningStyle);
   const familiarityLevel = normalize(payload.familiarityLevel);
-  const timeZone = normalize(payload.timeZone);
+  const timeZone = normalize(payload.timeZone) || "America/New_York";
   const availabilityNotes = normalize(payload.availabilityNotes || payload.availability);
   const availabilitySlots = parseAvailabilitySlots(payload.availabilitySlots);
   const openToOtherTimes = toSafeBool(payload.openToOtherTimes, false);
-  const format = normalize(payload.format);
+  const format = allowedFormats.has(normalize(payload.format))
+    ? normalize(payload.format)
+    : "flexible";
   const city = normalize(payload.city);
   const state = normalize(payload.state);
   const email = normalize(payload.email);
   const posterName = normalize(payload.posterName);
   const contactMethod = normalize(payload.contactMethod || "relay");
   const durationDays = Number(payload.durationDays);
-
-  if (
-    !category ||
-    !seferName ||
-    !topic ||
-    !learningStyle ||
-    !familiarityLevel ||
-    !timeZone ||
-    !format ||
-    !email
-  ) {
-    return { error: "Please fill all required fields." };
-  }
-
-  if (!availabilitySlots.length) {
-    return { error: "Add at least one preferred time slot." };
-  }
-
-  if (!allowedFormats.has(format)) {
-    return { error: "Invalid format." };
-  }
-
-  if (requireDuration && !allowedDurations.has(durationDays)) {
-    return { error: "Duration must be 7, 14, or 30 days." };
-  }
+  const finalDurationDays = allowedDurations.has(durationDays) ? durationDays : 30;
 
   const needsLocation = format === "in_person_only" || format === "in_person_preferred";
-  if (needsLocation && (!city || !state)) {
-    return { error: "City and state are required for in-person posts." };
-  }
 
   if (contactMethod !== "relay") {
     return { error: "Only relay contact is supported." };
@@ -248,7 +223,7 @@ function validatePostPayload(payload, options = {}) {
       email,
       posterName: titleCaseWords(posterName),
       contactMethod,
-      durationDays: requireDuration ? durationDays : undefined
+      durationDays: requireDuration ? finalDurationDays : undefined
     }
   };
 }
@@ -310,22 +285,27 @@ function initDb() {
 
 function ensurePostsSchema() {
   const columns = db.prepare("PRAGMA table_info(posts)").all();
-  const hasSeferName = columns.some((column) => column.name === "seferName");
-  const hasAvailabilityNotes = columns.some((column) => column.name === "availabilityNotes");
-  const hasAvailabilitySlots = columns.some((column) => column.name === "availabilitySlots");
-  const hasOpenToOtherTimes = columns.some((column) => column.name === "openToOtherTimes");
+  const columnNames = new Set(columns.map((column) => column.name));
+  const hasSeferName = columnNames.has("seferName");
+  const hasAvailabilityNotes = columnNames.has("availabilityNotes");
+  const hasAvailabilitySlots = columnNames.has("availabilitySlots");
+  const hasOpenToOtherTimes = columnNames.has("openToOtherTimes");
   const hasAvailability = columns.some((column) => column.name === "availability");
-  if (!hasSeferName) {
-    db.exec("ALTER TABLE posts ADD COLUMN seferName TEXT NOT NULL DEFAULT ''");
-  }
-  if (!hasAvailabilityNotes) {
-    db.exec("ALTER TABLE posts ADD COLUMN availabilityNotes TEXT NOT NULL DEFAULT ''");
-  }
-  if (!hasAvailabilitySlots) {
-    db.exec("ALTER TABLE posts ADD COLUMN availabilitySlots TEXT NOT NULL DEFAULT '[]'");
-  }
-  if (!hasOpenToOtherTimes) {
-    db.exec("ALTER TABLE posts ADD COLUMN openToOtherTimes INTEGER NOT NULL DEFAULT 0");
+  const missingColumnStatements = [
+    ["seferName", "ALTER TABLE posts ADD COLUMN seferName TEXT NOT NULL DEFAULT ''"],
+    ["availabilityNotes", "ALTER TABLE posts ADD COLUMN availabilityNotes TEXT NOT NULL DEFAULT ''"],
+    ["availabilitySlots", "ALTER TABLE posts ADD COLUMN availabilitySlots TEXT NOT NULL DEFAULT '[]'"],
+    ["openToOtherTimes", "ALTER TABLE posts ADD COLUMN openToOtherTimes INTEGER NOT NULL DEFAULT 0"],
+    ["posterName", "ALTER TABLE posts ADD COLUMN posterName TEXT NOT NULL DEFAULT ''"],
+    ["durationDays", "ALTER TABLE posts ADD COLUMN durationDays INTEGER NOT NULL DEFAULT 30"],
+    ["createdAt", "ALTER TABLE posts ADD COLUMN createdAt TEXT NOT NULL DEFAULT ''"],
+    ["expiresAt", "ALTER TABLE posts ADD COLUMN expiresAt TEXT NOT NULL DEFAULT ''"],
+    ["status", "ALTER TABLE posts ADD COLUMN status TEXT NOT NULL DEFAULT 'active'"]
+  ];
+  for (const [columnName, statement] of missingColumnStatements) {
+    if (!columnNames.has(columnName)) {
+      db.exec(statement);
+    }
   }
 
   if (hasAvailability) {
@@ -434,6 +414,76 @@ function syncExpiredPosts() {
   db.prepare("UPDATE posts SET status = 'expired' WHERE status = 'active' AND expiresAt <= ?").run(
     nowIso()
   );
+}
+
+function defaultValueForRequiredPostColumn(name, type, post) {
+  const known = {
+    id: post.id,
+    manageToken: post.manageToken,
+    category: post.category || "Other",
+    seferName: post.seferName || "",
+    topic: post.topic || "Untitled request",
+    learningStyle: post.learningStyle || "",
+    familiarityLevel: post.familiarityLevel || "",
+    timeZone: post.timeZone || "America/New_York",
+    availabilityNotes: post.availabilityNotes || "",
+    availabilitySlots: post.availabilitySlots || "[]",
+    openToOtherTimes: typeof post.openToOtherTimes === "number" ? post.openToOtherTimes : 0,
+    format: post.format || "flexible",
+    city: post.city || "",
+    state: post.state || "",
+    contactMethod: post.contactMethod || "relay",
+    posterName: post.posterName || "",
+    email: post.email || "",
+    durationDays: Number.isFinite(post.durationDays) ? post.durationDays : 30,
+    createdAt: post.createdAt || nowIso(),
+    expiresAt:
+      post.expiresAt || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+    status: post.status || "active",
+    postCode: `CB-${String(post.id || "").slice(0, 6).toUpperCase()}`
+  };
+  if (Object.prototype.hasOwnProperty.call(known, name)) {
+    return known[name];
+  }
+
+  const normalizedType = String(type || "").toUpperCase();
+  if (normalizedType.includes("INT")) {
+    return 0;
+  }
+  if (
+    normalizedType.includes("REAL") ||
+    normalizedType.includes("FLOA") ||
+    normalizedType.includes("DOUB")
+  ) {
+    return 0;
+  }
+  return "";
+}
+
+function insertPostRow(post) {
+  const columns = db.prepare("PRAGMA table_info(posts)").all();
+  const row = {};
+
+  for (const column of columns) {
+    const name = column.name;
+    if (Object.prototype.hasOwnProperty.call(post, name)) {
+      row[name] = post[name];
+      continue;
+    }
+    const hasDbDefault = column.dflt_value !== null && column.dflt_value !== undefined;
+    if (column.notnull && !hasDbDefault) {
+      row[name] = defaultValueForRequiredPostColumn(name, column.type, post);
+    }
+  }
+
+  const names = Object.keys(row);
+  if (!names.length) {
+    throw new Error("No columns available for insert.");
+  }
+
+  const columnList = names.join(", ");
+  const valuesList = names.map((name) => `@${name}`).join(", ");
+  db.prepare(`INSERT INTO posts (${columnList}) VALUES (${valuesList})`).run(row);
 }
 
 function getPostWithConversationsByToken(token) {
@@ -555,17 +605,17 @@ app.post("/api/posts", async (req, res) => {
       status: "active"
     };
 
-    db.prepare(
-      `
-      INSERT INTO posts (
-        id, manageToken, category, seferName, topic, learningStyle, familiarityLevel, timeZone, availabilityNotes,
-        availabilitySlots, openToOtherTimes, format, city, state, contactMethod, posterName, email, durationDays, createdAt, expiresAt, status
-      ) VALUES (
-        @id, @manageToken, @category, @seferName, @topic, @learningStyle, @familiarityLevel, @timeZone, @availabilityNotes,
-        @availabilitySlots, @openToOtherTimes, @format, @city, @state, @contactMethod, @posterName, @email, @durationDays, @createdAt, @expiresAt, @status
-      )
-    `
-    ).run(post);
+    try {
+      insertPostRow(post);
+    } catch (error) {
+      // If production DB schema is older than code, attempt live repair once and retry.
+      if (String(error?.message || "").includes("has no column named")) {
+        ensurePostsSchema();
+        insertPostRow(post);
+      } else {
+        throw error;
+      }
+    }
 
     const transporter = getTransporter();
     if (transporter) {
@@ -592,7 +642,9 @@ app.post("/api/posts", async (req, res) => {
       post: toPublicPost(post),
       manageUrl: `${buildBaseUrl(req)}/manage/${post.manageToken}`
     });
-  } catch (_error) {
+  } catch (error) {
+    const details = error?.message || String(error);
+    console.error("Create post failed:", details);
     return res.status(500).json({ error: "Could not create post." });
   }
 });
@@ -647,39 +699,53 @@ app.post("/api/posts/:id/respond", async (req, res) => {
     ).run(conversation);
 
     const transporter = getTransporter();
-    if (transporter) {
-      const subject = `[Chavrusashaft] New response to: ${post.topic}`;
-      const body = [
-        "You received a new response to your learning request.",
-        "",
-        `Category: ${post.category}`,
-        `Topic: ${post.topic}`,
-        "",
-        "Message:",
-        message,
-        "",
-        responderTimeZone ? `Responder time zone: ${responderTimeZone}` : "",
-        responderAvailability ? `Responder availability: ${responderAvailability}` : "",
-        "",
-        `Manage your post: ${buildBaseUrl(req)}/manage/${post.manageToken}`
-      ]
-        .filter(Boolean)
-        .join("\n");
+    const subject = `[Chavrusashaft] New response to: ${post.topic}`;
+    const body = [
+      "You received a new response to your learning request.",
+      "",
+      `Category: ${post.category}`,
+      `Topic: ${post.topic}`,
+      "",
+      "Message:",
+      message,
+      "",
+      responderTimeZone ? `Responder time zone: ${responderTimeZone}` : "",
+      responderAvailability ? `Responder availability: ${responderAvailability}` : "",
+      "",
+      `Manage your post: ${buildBaseUrl(req)}/manage/${post.manageToken}`
+    ]
+      .filter(Boolean)
+      .join("\n");
 
-      try {
-        await transporter.sendMail({
-          from: process.env.RELAY_FROM_EMAIL || process.env.SMTP_USER,
-          to: post.email,
-          subject,
-          text: body
-        });
-      } catch (error) {
-        console.error("Response saved but relay email failed:", error.message);
-        return res.json({
-          ok: true,
-          warning: "Message saved, but relay email delivery failed. Check SMTP settings."
-        });
-      }
+    if (!post.email) {
+      return res.json({
+        ok: true,
+        warning:
+          "Message saved, but this post has no email address for notifications. Use the manage link to view responses."
+      });
+    }
+
+    if (!transporter) {
+      return res.json({
+        ok: true,
+        warning:
+          "Message saved, but email relay is not configured yet. Set SMTP variables in Railway to enable notifications."
+      });
+    }
+
+    try {
+      await transporter.sendMail({
+        from: process.env.RELAY_FROM_EMAIL || process.env.SMTP_USER,
+        to: post.email,
+        subject,
+        text: body
+      });
+    } catch (error) {
+      console.error("Response saved but relay email failed:", error.message);
+      return res.json({
+        ok: true,
+        warning: "Message saved, but relay email delivery failed. Check SMTP settings."
+      });
     }
 
     return res.json({ ok: true });

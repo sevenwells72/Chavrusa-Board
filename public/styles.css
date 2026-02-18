@@ -218,6 +218,10 @@ textarea {
   font-weight: 700;
 }
 
+.tag-label {
+  font-weight: 800;
+}
+
 .card p {
   margin: 0.3rem 0;
 }
@@ -225,6 +229,12 @@ textarea {
 .card .muted,
 .muted {
   color: var(--muted);
+}
+
+.post-code {
+  margin-top: 0.2rem;
+  font-size: 0.8rem;
+  font-weight: 600;
 }
 
 .stack {

@@ -22,6 +22,26 @@ const formatIcons = {
   flexible: "🔁"
 };
 
+const timeZoneLabels = {
+  "America/New_York": "Eastern Time",
+  "America/Chicago": "Central Time",
+  "America/Denver": "Mountain Time",
+  "America/Los_Angeles": "Pacific Time",
+  "Asia/Jerusalem": "Israel Time",
+  "Europe/London": "UK Time"
+};
+
+const dayLabels = {
+  Daily: "Daily",
+  Sun: "Sunday",
+  Mon: "Monday",
+  Tue: "Tuesday",
+  Wed: "Wednesday",
+  Thu: "Thursday",
+  Fri: "Friday",
+  "Motzei Shabbos": "Motzei Shabbos"
+};
+
 let posts = [];
 let adminMode = false;
 let ownerDeleteKey = sessionStorage.getItem("ownerDeleteKey") || "";
@@ -43,6 +63,17 @@ function toDateLabel(iso) {
   });
 }
 
+function toFriendlyTimeZone(zone) {
+  const normalized = String(zone || "").trim();
+  if (!normalized) {
+    return "Not specified";
+  }
+  if (timeZoneLabels[normalized]) {
+    return timeZoneLabels[normalized];
+  }
+  return normalized.replaceAll("_", " ").replaceAll("/", " / ");
+}
+
 function timeToMinutes(value) {
   const [h, m] = String(value).split(":").map(Number);
   if (!Number.isFinite(h) || !Number.isFinite(m)) {
@@ -58,17 +89,33 @@ function formatTimeLabel(value) {
   }
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
-  const suffix = h >= 12 ? "pm" : "am";
+  const suffix = h >= 12 ? "PM" : "AM";
   const hour = h % 12 === 0 ? 12 : h % 12;
-  const min = m === 0 ? "" : `:${String(m).padStart(2, "0")}`;
-  return `${hour}${min}${suffix}`;
+  const min = `:${String(m).padStart(2, "0")}`;
+  return `${hour}${min} ${suffix}`;
 }
 
 function formatSlot(slot) {
+  const day = dayLabels[slot.day] || slot.day || "Day";
   if (slot.flexible) {
-    return `${slot.day} flexible`;
+    return `${day} (flexible)`;
   }
-  return `${slot.day} ${formatTimeLabel(slot.start)}-${formatTimeLabel(slot.end)}`;
+  return `${day} ${formatTimeLabel(slot.start)} - ${formatTimeLabel(slot.end)}`;
+}
+
+function parseSlots(value) {
+  if (Array.isArray(value)) {
+    return value;
+  }
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (_error) {
+      return [];
+    }
+  }
+  return [];
 }
 
 function isOverlapMatch(post, day, time) {
@@ -116,27 +163,38 @@ function render(items) {
 
   results.innerHTML = items
     .map((post) => {
-      const slots = Array.isArray(post.availabilitySlots) ? post.availabilitySlots : [];
+      const slots = parseSlots(post.availabilitySlots);
       const slotsText = slots.length ? slots.map(formatSlot).join(", ") : "No time slots listed";
       const displayName = post.posterName ? post.posterName : "Anonymous learner";
+      const topic = post.topic ? post.topic : "Not specified";
+      const seferName = post.seferName ? post.seferName : "Not specified";
+      const category = post.category ? post.category : "Other";
+      const learningStyle = post.learningStyle ? post.learningStyle : "";
+      const friendlyZone = toFriendlyTimeZone(post.timeZone);
 
       return `
         <article class="card post-card">
           <button class="owner-delete-btn" data-post-id="${escapeHtml(post.id)}" title="Owner delete">Delete</button>
           <div class="post-head">
-            <p class="display-name">${escapeHtml(displayName)}</p>
-            <h3>${escapeHtml(post.topic)}</h3>
-            <p class="muted">Post code: <strong>${escapeHtml(post.postCode || "")}</strong></p>
+            <h3><strong>Sefer:</strong> ${escapeHtml(seferName)}</h3>
+            <p class="display-name"><strong>Category:</strong> ${escapeHtml(category)}</p>
           </div>
           <div class="meta">
-            <span class="tag">${escapeHtml(post.category)}</span>
-            ${post.seferName ? `<span class="tag">${escapeHtml(post.seferName)}</span>` : ""}
-            <span class="tag">${escapeHtml(post.timeZone)}</span>
-            <span class="tag">${escapeHtml(post.familiarityLevel)}</span>
-            <span class="tag">${escapeHtml(formatIcons[post.format] || "•")} ${escapeHtml(formatLabels[post.format] || post.format)}</span>
+            <span class="tag"><span class="tag-label">Timezone:</span> ${escapeHtml(friendlyZone)}</span>
+            ${
+              post.familiarityLevel
+                ? `<span class="tag"><span class="tag-label">Level:</span> ${escapeHtml(post.familiarityLevel)}</span>`
+                : ""
+            }
+            <span class="tag"><span class="tag-label">Format:</span> ${escapeHtml(formatIcons[post.format] || "•")} ${escapeHtml(formatLabels[post.format] || post.format)}</span>
           </div>
           <div class="post-body">
-            <p><strong>Learning style:</strong> ${escapeHtml(post.learningStyle)}</p>
+            <p><strong>Sugya:</strong> ${escapeHtml(topic)}</p>
+            ${
+              learningStyle
+                ? `<p><strong>Learning style:</strong> ${escapeHtml(learningStyle)}</p>`
+                : ""
+            }
             <p><strong>Times:</strong> ${escapeHtml(slotsText)}</p>
             ${
               post.openToOtherTimes
@@ -155,8 +213,10 @@ function render(items) {
             }
           </div>
           <div class="post-foot">
-            <p class="muted">Active until ${toDateLabel(post.expiresAt)}</p>
+            <p class="muted"><strong>Active until:</strong> ${toDateLabel(post.expiresAt)}</p>
             <p><a class="button-link" href="/respond/${post.id}">Respond</a></p>
+            <p class="post-code muted"><strong>Posted by:</strong> ${escapeHtml(displayName)}</p>
+            <p class="post-code muted">Post code: ${escapeHtml(post.postCode || "")}</p>
           </div>
         </article>
       `;

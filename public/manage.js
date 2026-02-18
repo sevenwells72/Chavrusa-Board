@@ -14,7 +14,7 @@ const slotList = document.getElementById("slotList");
 const addSlotBtn = document.getElementById("addSlotBtn");
 const availabilitySlotsInput = document.getElementById("availabilitySlotsInput");
 
-const dayOptions = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Motzei Shabbos"];
+const dayOptions = ["Daily", "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Motzei Shabbos"];
 
 function escapeHtml(value) {
   return String(value)
@@ -34,8 +34,6 @@ function setLocationRequirement() {
   const needsLocation =
     formatSelect.value === "in_person_only" || formatSelect.value === "in_person_preferred";
   locationFields.classList.toggle("hidden", !needsLocation);
-  cityInput.required = needsLocation;
-  stateInput.required = needsLocation;
 }
 
 function dateLabel(value) {
@@ -44,7 +42,7 @@ function dateLabel(value) {
 
 function buildDaySelect(selected = "") {
   return `
-    <select class="slot-day" required>
+    <select class="slot-day">
       <option value="">Day</option>
       ${dayOptions
         .map(
@@ -122,10 +120,6 @@ function collectSlots() {
       end: flexible ? "" : end,
       flexible
     });
-  }
-
-  if (!slots.length) {
-    return { error: "Add at least one preferred time slot." };
   }
 
   return { slots };
