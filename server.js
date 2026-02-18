@@ -130,12 +130,28 @@ function getTransporter() {
     return null;
   }
 
-  return nodemailer.createTransport({
+  const transportOptions = {
     host,
     port: portValue,
     secure,
-    auth: { user, pass }
-  });
+    auth: { user, pass },
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 15000
+  };
+
+  // Gmail shortcut — more reliable on cloud hosts that may block raw SMTP ports.
+  if (host === "smtp.gmail.com") {
+    return nodemailer.createTransport({
+      service: "gmail",
+      auth: { user, pass },
+      connectionTimeout: 10000,
+      greetingTimeout: 10000,
+      socketTimeout: 15000
+    });
+  }
+
+  return nodemailer.createTransport(transportOptions);
 }
 
 function toPublicPost(post) {
