@@ -2,7 +2,6 @@ const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
 const express = require("express");
-const nodemailer = require("nodemailer");
 const Database = require("better-sqlite3");
 require("dotenv").config();
 
@@ -19,6 +18,10 @@ const allowedFormats = new Set([
   "flexible"
 ]);
 const rateBuckets = new Map();
+let gmailTokenCache = {
+  accessToken: "",
+  expiresAtMs: 0
+};
 
 let db;
 
@@ -112,46 +115,134 @@ function toSafeBool(value, fallback = false) {
   return fallback;
 }
 
-function getTransporter() {
-  const host = process.env.SMTP_HOST;
-  const user = process.env.SMTP_USER;
-  const pass = process.env.SMTP_PASS;
-  const portValue = Number(process.env.SMTP_PORT || 587);
-  const secure = process.env.SMTP_SECURE === "true";
+function getRelayConfig() {
+  const gmailClientId = normalize(process.env.GMAIL_CLIENT_ID);
+  const gmailClientSecret = normalize(process.env.GMAIL_CLIENT_SECRET);
+  const gmailRefreshToken = normalize(process.env.GMAIL_REFRESH_TOKEN);
+  const fromEmail = normalize(process.env.RELAY_FROM_EMAIL);
   const looksLikePlaceholder =
-    !host ||
-    !user ||
-    !pass ||
-    host.includes("example.com") ||
-    user.includes("your_smtp_user") ||
-    pass.includes("your_smtp_password");
-
+    !gmailClientId ||
+    !gmailClientSecret ||
+    !gmailRefreshToken ||
+    !fromEmail ||
+    gmailClientId.includes("replace_me") ||
+    gmailClientSecret.includes("replace_me") ||
+    gmailRefreshToken.includes("replace_me") ||
+    fromEmail.includes("example.com");
   if (looksLikePlaceholder) {
     return null;
   }
+  return { gmailClientId, gmailClientSecret, gmailRefreshToken, fromEmail };
+}
 
-  const transportOptions = {
-    host,
-    port: portValue,
-    secure,
-    auth: { user, pass },
-    connectionTimeout: 10000,
-    greetingTimeout: 10000,
-    socketTimeout: 15000
-  };
+function toBase64Url(value) {
+  return Buffer.from(value, "utf8")
+    .toString("base64")
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replace(/=+$/g, "");
+}
 
-  // Gmail shortcut — more reliable on cloud hosts that may block raw SMTP ports.
-  if (host === "smtp.gmail.com") {
-    return nodemailer.createTransport({
-      service: "gmail",
-      auth: { user, pass },
-      connectionTimeout: 10000,
-      greetingTimeout: 10000,
-      socketTimeout: 15000
-    });
+async function getGmailAccessToken(config) {
+  const now = Date.now();
+  if (gmailTokenCache.accessToken && gmailTokenCache.expiresAtMs - 30000 > now) {
+    return { ok: true, accessToken: gmailTokenCache.accessToken };
   }
 
-  return nodemailer.createTransport(transportOptions);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 12000);
+  try {
+    const response = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: config.gmailClientId,
+        client_secret: config.gmailClientSecret,
+        refresh_token: config.gmailRefreshToken,
+        grant_type: "refresh_token"
+      }),
+      signal: controller.signal
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.access_token) {
+      return {
+        ok: false,
+        error: `Gmail OAuth error (${response.status}): ${JSON.stringify(payload).slice(0, 240)}`
+      };
+    }
+
+    const expiresInSec = Number(payload.expires_in || 3600);
+    gmailTokenCache = {
+      accessToken: payload.access_token,
+      expiresAtMs: now + expiresInSec * 1000
+    };
+    return { ok: true, accessToken: payload.access_token };
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      return { ok: false, error: "Gmail OAuth timeout." };
+    }
+    return { ok: false, error: error?.message || "Gmail OAuth request failed." };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function sendRelayEmail({ to, subject, text }) {
+  const config = getRelayConfig();
+  if (!config) {
+    return { ok: false, error: "Email relay is not configured yet." };
+  }
+  if (!normalize(to)) {
+    return { ok: false, error: "Recipient email is missing." };
+  }
+
+  const tokenResult = await getGmailAccessToken(config);
+  if (!tokenResult.ok) {
+    return tokenResult;
+  }
+
+  const rawMessage = [
+    `From: ${config.fromEmail}`,
+    `To: ${to}`,
+    `Subject: ${subject}`,
+    "MIME-Version: 1.0",
+    'Content-Type: text/plain; charset="UTF-8"',
+    "Content-Transfer-Encoding: 7bit",
+    "",
+    text
+  ].join("\r\n");
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 12000);
+  try {
+    const response = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${tokenResult.accessToken}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        raw: toBase64Url(rawMessage)
+      }),
+      signal: controller.signal
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      return {
+        ok: false,
+        error: `Gmail API error (${response.status}): ${body.slice(0, 240)}`
+      };
+    }
+    return { ok: true };
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      return { ok: false, error: "Gmail API timeout." };
+    }
+    return { ok: false, error: error?.message || "Gmail API request failed." };
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function toPublicPost(post) {
@@ -633,24 +724,21 @@ app.post("/api/posts", async (req, res) => {
       }
     }
 
-    const transporter = getTransporter();
-    if (transporter) {
-      try {
-        await transporter.sendMail({
-          from: process.env.RELAY_FROM_EMAIL || process.env.SMTP_USER,
-          to: post.email,
-          subject: "[Chavrusashaft] Your post is live",
-          text: [
-            "Your learning request is now active on Chavrusashaft.",
-            "",
-            `Topic: ${post.topic}`,
-            `Active until: ${new Date(post.expiresAt).toLocaleDateString()}`,
-            "",
-            `Manage link: ${buildBaseUrl(req)}/manage/${post.manageToken}`
-          ].join("\n")
-        });
-      } catch (error) {
-        console.error("Post created but confirmation email failed:", error.message);
+    if (post.email) {
+      const emailResult = await sendRelayEmail({
+        to: post.email,
+        subject: "[Chavrusashaft] Your post is live",
+        text: [
+          "Your learning request is now active on Chavrusashaft.",
+          "",
+          `Topic: ${post.topic}`,
+          `Active until: ${new Date(post.expiresAt).toLocaleDateString()}`,
+          "",
+          `Manage link: ${buildBaseUrl(req)}/manage/${post.manageToken}`
+        ].join("\n")
+      });
+      if (!emailResult.ok) {
+        console.error("Post created but confirmation email failed:", emailResult.error);
       }
     }
 
@@ -714,7 +802,6 @@ app.post("/api/posts/:id/respond", async (req, res) => {
     `
     ).run(conversation);
 
-    const transporter = getTransporter();
     const subject = `[Chavrusashaft] New response to: ${post.topic}`;
     const body = [
       "You received a new response to your learning request.",
@@ -741,26 +828,20 @@ app.post("/api/posts/:id/respond", async (req, res) => {
       });
     }
 
-    if (!transporter) {
+    if (!getRelayConfig()) {
       return res.json({
         ok: true,
         warning:
-          "Message saved, but email relay is not configured yet. Set SMTP variables in Railway to enable notifications."
+          "Message saved, but email relay is not configured yet. Set Gmail API variables and RELAY_FROM_EMAIL in Railway."
       });
     }
 
-    try {
-      await transporter.sendMail({
-        from: process.env.RELAY_FROM_EMAIL || process.env.SMTP_USER,
-        to: post.email,
-        subject,
-        text: body
-      });
-    } catch (error) {
-      console.error("Response saved but relay email failed:", error.message);
+    const emailResult = await sendRelayEmail({ to: post.email, subject, text: body });
+    if (!emailResult.ok) {
+      console.error("Response saved but relay email failed:", emailResult.error);
       return res.json({
         ok: true,
-        warning: "Message saved, but relay email delivery failed. Check SMTP settings."
+        warning: "Message saved, but relay email delivery failed. Check Gmail API settings."
       });
     }
 
@@ -968,13 +1049,14 @@ app.post("/api/manage/:token/reply", async (req, res) => {
       return res.status(404).json({ error: "Conversation not found." });
     }
 
-    const transporter = getTransporter();
-    if (!transporter) {
-      return res.status(500).json({ error: "SMTP relay is not configured." });
+    if (!getRelayConfig()) {
+      return res.status(500).json({
+        error:
+          "Email relay is not configured. Set GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN, and RELAY_FROM_EMAIL."
+      });
     }
 
-    await transporter.sendMail({
-      from: process.env.RELAY_FROM_EMAIL || process.env.SMTP_USER,
+    const emailResult = await sendRelayEmail({
       to: conversation.responderEmail,
       subject: `[Chavrusashaft] Reply about: ${post.topic}`,
       text: [
@@ -989,6 +1071,9 @@ app.post("/api/manage/:token/reply", async (req, res) => {
         "If you want to share direct contact, include it in your next message."
       ].join("\n")
     });
+    if (!emailResult.ok) {
+      return res.status(502).json({ error: `Could not send relay reply. ${emailResult.error}` });
+    }
 
     db.prepare("INSERT INTO replies (conversationId, message, createdAt) VALUES (?, ?, ?)").run(
       conversation.id,

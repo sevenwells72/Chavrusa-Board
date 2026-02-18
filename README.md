@@ -28,6 +28,7 @@ Public bulletin board for chavrusa learning requests with private relay messagin
 - Posts auto-hide when expired.
 - Location is shown only for in-person only/preferred posts.
 - Emails are used privately for relay; not public.
+- Email relay uses Gmail API over HTTPS (no SMTP ports), so it works on Railway Hobby plans.
 - Basic anti-spam rate limits on post creation and responses.
 - Data is stored in SQLite (`data/chavrus.db` by default).
 - If `data/posts.json` exists and DB is empty, data is auto-migrated on first run.
@@ -42,6 +43,12 @@ npm install
 ```bash
 cp .env.example .env
 ```
+Set these for email relay:
+- `RELAY_FROM_EMAIL` (the Gmail/Workspace sender address)
+- `GMAIL_CLIENT_ID`
+- `GMAIL_CLIENT_SECRET`
+- `GMAIL_REFRESH_TOKEN`
+
 3. Start server:
 ```bash
 npm start
