@@ -6,7 +6,7 @@ const formatLabels = {
   in_person_only: "In-person only",
   in_person_preferred: "In-person preferred",
   remote_only: "Remote only",
-  flexible: "Flexible"
+  flexible: "In person or remote"
 };
 
 function escapeHtml(value) {
@@ -52,9 +52,11 @@ function renderPost(post) {
     }
     ${post.openToOtherTimes ? `<p class="muted"><em>Open to other times too.</em></p>` : ""}
     ${
-      post.city && post.state
-        ? `<p><strong>Location:</strong> ${escapeHtml(post.city)}, ${escapeHtml(post.state)}</p>`
-        : ""
+      post.location
+        ? `<p><strong>Location:</strong> ${escapeHtml(post.location)}</p>`
+        : post.city && post.state
+          ? `<p><strong>Location:</strong> ${escapeHtml(post.city)}, ${escapeHtml(post.state)}</p>`
+          : ""
     }
     <p class="muted">Contact is relayed privately. Your email is not shown publicly.</p>
   `;

@@ -265,6 +265,7 @@ function toPublicPost(post) {
     format: post.format,
     city: showLocation ? post.city : "",
     state: showLocation ? post.state : "",
+    location: post.location || "",
     posterName: titleCaseWords(post.posterName),
     createdAt: post.createdAt,
     expiresAt: post.expiresAt
@@ -301,6 +302,7 @@ function validatePostPayload(payload, options = {}) {
     : "flexible";
   const city = normalize(payload.city);
   const state = normalize(payload.state);
+  const location = normalize(payload.location);
   const email = normalize(payload.email);
   const posterName = normalize(payload.posterName);
   const contactMethod = normalize(payload.contactMethod || "relay");
@@ -327,6 +329,7 @@ function validatePostPayload(payload, options = {}) {
       format,
       city: needsLocation ? city : "",
       state: needsLocation ? state : "",
+      location,
       email,
       posterName: titleCaseWords(posterName),
       contactMethod,
@@ -357,6 +360,7 @@ function initDb() {
       format TEXT NOT NULL,
       city TEXT NOT NULL DEFAULT '',
       state TEXT NOT NULL DEFAULT '',
+      location TEXT NOT NULL DEFAULT '',
       contactMethod TEXT NOT NULL,
       posterName TEXT NOT NULL DEFAULT '',
       email TEXT NOT NULL,
@@ -407,7 +411,8 @@ function ensurePostsSchema() {
     ["durationDays", "ALTER TABLE posts ADD COLUMN durationDays INTEGER NOT NULL DEFAULT 30"],
     ["createdAt", "ALTER TABLE posts ADD COLUMN createdAt TEXT NOT NULL DEFAULT ''"],
     ["expiresAt", "ALTER TABLE posts ADD COLUMN expiresAt TEXT NOT NULL DEFAULT ''"],
-    ["status", "ALTER TABLE posts ADD COLUMN status TEXT NOT NULL DEFAULT 'active'"]
+    ["status", "ALTER TABLE posts ADD COLUMN status TEXT NOT NULL DEFAULT 'active'"],
+    ["location", "ALTER TABLE posts ADD COLUMN location TEXT NOT NULL DEFAULT ''"]
   ];
   for (const [columnName, statement] of missingColumnStatements) {
     if (!columnNames.has(columnName)) {
@@ -437,10 +442,10 @@ function migrateFromJsonIfNeeded() {
   const insertPost = db.prepare(`
     INSERT INTO posts (
       id, manageToken, category, seferName, topic, learningStyle, familiarityLevel, timeZone, availabilityNotes,
-      availabilitySlots, openToOtherTimes, format, city, state, contactMethod, posterName, email, durationDays, createdAt, expiresAt, status
+      availabilitySlots, openToOtherTimes, format, city, state, location, contactMethod, posterName, email, durationDays, createdAt, expiresAt, status
     ) VALUES (
       @id, @manageToken, @category, @seferName, @topic, @learningStyle, @familiarityLevel, @timeZone, @availabilityNotes,
-      @availabilitySlots, @openToOtherTimes, @format, @city, @state, @contactMethod, @posterName, @email, @durationDays, @createdAt, @expiresAt, @status
+      @availabilitySlots, @openToOtherTimes, @format, @city, @state, @location, @contactMethod, @posterName, @email, @durationDays, @createdAt, @expiresAt, @status
     )
   `);
 
@@ -479,6 +484,7 @@ function migrateFromJsonIfNeeded() {
         format: post.format || "flexible",
         city: post.city || "",
         state: post.state || "",
+        location: post.location || "",
         contactMethod: post.contactMethod || "relay",
         posterName: post.posterName || "",
         email: post.email || "missing@example.com",
@@ -539,6 +545,7 @@ function defaultValueForRequiredPostColumn(name, type, post) {
     format: post.format || "flexible",
     city: post.city || "",
     state: post.state || "",
+    location: post.location || "",
     contactMethod: post.contactMethod || "relay",
     posterName: post.posterName || "",
     email: post.email || "",
@@ -703,6 +710,7 @@ app.post("/api/posts", async (req, res) => {
       format: data.format,
       city: data.city,
       state: data.state,
+      location: data.location,
       contactMethod: data.contactMethod,
       posterName: data.posterName,
       email: data.email,
@@ -920,6 +928,7 @@ app.post("/api/manage/:token/update", async (req, res) => {
         format = @format,
         city = @city,
         state = @state,
+        location = @location,
         email = @email,
         posterName = @posterName,
         contactMethod = 'relay'
@@ -938,6 +947,7 @@ app.post("/api/manage/:token/update", async (req, res) => {
       format: data.format,
       city: data.city,
       state: data.state,
+      location: data.location,
       email: data.email,
       posterName: data.posterName,
       manageToken: req.params.token
@@ -1002,6 +1012,19 @@ app.post("/api/manage/:token/delete", async (req, res) => {
   }
 });
 
+app.post("/api/admin/verify", (req, res) => {
+  const ownerDeleteKey = normalize(process.env.OWNER_DELETE_KEY);
+  const providedKey = normalize(req.body.key);
+
+  if (!ownerDeleteKey) {
+    return res.status(503).json({ error: "Owner delete key is not configured on the server." });
+  }
+  if (!providedKey || providedKey !== ownerDeleteKey) {
+    return res.status(403).json({ error: "Wrong owner key." });
+  }
+  return res.json({ ok: true });
+});
+
 app.post("/api/admin/delete", async (req, res) => {
   const ownerDeleteKey = normalize(process.env.OWNER_DELETE_KEY);
   const providedKey = normalize(req.body.key);
@@ -1011,7 +1034,7 @@ app.post("/api/admin/delete", async (req, res) => {
     return res.status(503).json({ error: "Owner delete key is not configured." });
   }
   if (!providedKey || providedKey !== ownerDeleteKey) {
-    return res.status(403).json({ error: "Unauthorized." });
+    return res.status(403).json({ error: "Wrong owner key." });
   }
   if (!postId) {
     return res.status(400).json({ error: "Post id is required." });

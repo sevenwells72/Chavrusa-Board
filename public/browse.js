@@ -12,14 +12,14 @@ const formatLabels = {
   in_person_only: "In-person only",
   in_person_preferred: "In-person preferred",
   remote_only: "Remote only",
-  flexible: "Flexible"
+  flexible: "In person or remote"
 };
 
 const formatIcons = {
   in_person_only: "📍",
   in_person_preferred: "🤝",
   remote_only: "💻",
-  flexible: "🔁"
+  flexible: "🔄"
 };
 
 const timeZoneLabels = {
@@ -207,9 +207,11 @@ function render(items) {
                 : ""
             }
             ${
-              post.city && post.state
-                ? `<p><strong>Location:</strong> ${escapeHtml(post.city)}, ${escapeHtml(post.state)}</p>`
-                : ""
+              post.location
+                ? `<p><strong>Location:</strong> ${escapeHtml(post.location)}</p>`
+                : post.city && post.state
+                  ? `<p><strong>Location:</strong> ${escapeHtml(post.city)}, ${escapeHtml(post.state)}</p>`
+                  : ""
             }
           </div>
           <div class="post-foot">
@@ -337,7 +339,7 @@ async function init() {
   ].forEach((el) => el.addEventListener("change", applyFilters));
   seferFilter.addEventListener("input", applyFilters);
 
-  siteTitle?.addEventListener("dblclick", () => {
+  siteTitle?.addEventListener("dblclick", async () => {
     if (adminMode) {
       setAdminMode(false);
       return;
@@ -346,11 +348,36 @@ async function init() {
     if (!key) {
       return;
     }
-    ownerDeleteKey = key.trim();
+    const trimmed = key.trim();
+    const response = await fetch("/api/admin/verify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key: trimmed })
+    });
+    if (!response.ok) {
+      const data = await response.json();
+      alert(data.error || "Invalid key.");
+      return;
+    }
+    ownerDeleteKey = trimmed;
     sessionStorage.setItem("ownerDeleteKey", ownerDeleteKey);
     setAdminMode(true);
     applyFilters();
   });
+
+  if (ownerDeleteKey) {
+    const verifyRes = await fetch("/api/admin/verify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key: ownerDeleteKey })
+    });
+    if (verifyRes.ok) {
+      setAdminMode(true);
+    } else {
+      sessionStorage.removeItem("ownerDeleteKey");
+      ownerDeleteKey = "";
+    }
+  }
 
   applyFilters();
 }

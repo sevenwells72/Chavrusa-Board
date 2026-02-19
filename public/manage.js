@@ -137,6 +137,7 @@ function setFormValues(post) {
     "format",
     "city",
     "state",
+    "location",
     "email",
     "posterName"
   ];
